@@ -1,0 +1,503 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ShiftCode {
+  A
+  B
+  C
+}
+
+enum ReadingSource {
+  MANUAL
+  SCADA
+}
+
+enum InterruptionStatus {
+  OPEN
+  CLOSED
+}
+
+enum OperationStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum EventSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum MessagePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum MessageStatus {
+  UNREAD
+  READ
+}
+
+enum NotificationChannelType {
+  WHATSAPP
+  SMS
+  EMAIL
+  IN_APP
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  users       User[]
+  permissions RolePermission[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Permission {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  roles     RolePermission[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model User {
+  id                  String          @id @default(uuid())
+  email               String          @unique
+  fullName            String
+  passwordHash        String
+  roleId              String
+  role                Role            @relation(fields: [roleId], references: [id])
+  isActive            Boolean         @default(true)
+  forcePasswordChange Boolean         @default(true)
+  scopes              UserScope[]
+  auditLogs           AuditLog[]
+  openedInterruptions Interruption[]  @relation("openedBy")
+  interruptionHistory InterruptionStatusHistory[]
+  operationHistory    OperationStatusHistory[]
+  events              Event[]
+  messageSent         Message[]       @relation("messageSender")
+  createdBatches      ReadingBatch[]  @relation("batchCreator")
+  updatedBatches      ReadingBatch[]  @relation("batchUpdater")
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deletedAt           DateTime?
+}
+
+model UserScope {
+  id                    String               @id @default(uuid())
+  userId                String
+  regionId              String?
+  stationId             String?
+  deviceId              String?
+  parameterDefinitionId String?
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  region                Region?              @relation(fields: [regionId], references: [id])
+  station               Station?             @relation(fields: [stationId], references: [id])
+  device                Device?              @relation(fields: [deviceId], references: [id])
+  parameterDefinition   ParameterDefinition? @relation(fields: [parameterDefinitionId], references: [id])
+
+  @@index([userId, regionId, stationId])
+}
+
+model Region {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  name      String
+  stations  Station[]
+  devices   Device[]
+  batches   ReadingBatch[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model Station {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  name      String
+  regionId  String
+  region    Region    @relation(fields: [regionId], references: [id])
+  devices   Device[]
+  batches   ReadingBatch[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model DeviceType {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  devices   Device[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Device {
+  id                    String                  @id @default(uuid())
+  uniqueCode            String                  @unique
+  displayName           String
+  stationId             String
+  regionId              String
+  deviceTypeId          String
+  voltageLevel          String
+  isActive              Boolean                 @default(true)
+  sortOrder             Int                     @default(0)
+  scadaMappingKey       String?
+  station               Station                 @relation(fields: [stationId], references: [id])
+  region                Region                  @relation(fields: [regionId], references: [id])
+  deviceType            DeviceType              @relation(fields: [deviceTypeId], references: [id])
+  parameterConfigs      DeviceParameterConfig[]
+  readingEntries        ReadingEntry[]
+  interruptions         Interruption[]
+  operations            Operation[]
+  events                Event[]
+  userScopes            UserScope[]
+  scadaMappings         ScadaMapping[]
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  deletedAt             DateTime?
+
+  @@index([regionId, stationId, deviceTypeId])
+}
+
+model ParameterDefinition {
+  id           String                  @id @default(uuid())
+  code         String                  @unique
+  name         String
+  unit         String?
+  isRequired   Boolean                 @default(true)
+  configs      DeviceParameterConfig[]
+  readingValue ReadingEntryValue[]
+  userScopes   UserScope[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+}
+
+model DeviceParameterConfig {
+  id                    String              @id @default(uuid())
+  deviceId              String
+  parameterDefinitionId String
+  displayOrder          Int                 @default(0)
+  isActive              Boolean             @default(true)
+  device                Device              @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  parameterDefinition   ParameterDefinition @relation(fields: [parameterDefinitionId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, parameterDefinitionId])
+}
+
+model Shift {
+  id        String    @id @default(uuid())
+  code      ShiftCode @unique
+  name      String
+  createdAt DateTime  @default(now())
+}
+
+model ConditionCode {
+  id          String            @id @default(uuid())
+  code        String            @unique
+  description String
+  values      ReadingEntryValue[]
+}
+
+model ReadingBatch {
+  id         String        @id @default(uuid())
+  regionId   String
+  stationId  String
+  shiftCode  ShiftCode
+  readingHour DateTime
+  source     ReadingSource @default(MANUAL)
+  createdById String
+  updatedById String
+  region     Region        @relation(fields: [regionId], references: [id])
+  station    Station       @relation(fields: [stationId], references: [id])
+  createdBy  User          @relation("batchCreator", fields: [createdById], references: [id])
+  updatedBy  User          @relation("batchUpdater", fields: [updatedById], references: [id])
+  entries    ReadingEntry[]
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@unique([stationId, readingHour])
+  @@index([regionId, stationId, shiftCode, readingHour])
+}
+
+model ReadingEntry {
+  id       String             @id @default(uuid())
+  batchId  String
+  deviceId String
+  batch    ReadingBatch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  device   Device             @relation(fields: [deviceId], references: [id])
+  values   ReadingEntryValue[]
+
+  @@unique([batchId, deviceId])
+}
+
+model ReadingEntryValue {
+  id                    String              @id @default(uuid())
+  entryId               String
+  parameterDefinitionId String
+  numericValue          Float?
+  conditionCodeId       String?
+  note                  String?
+  entry                 ReadingEntry        @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  parameterDefinition   ParameterDefinition @relation(fields: [parameterDefinitionId], references: [id])
+  conditionCode         ConditionCode?      @relation(fields: [conditionCodeId], references: [id])
+
+  @@unique([entryId, parameterDefinitionId])
+}
+
+model InterruptionCauseCode {
+  id          String         @id @default(uuid())
+  code        String         @unique
+  description String
+  interruptions Interruption[]
+}
+
+model Interruption {
+  id                  String                     @id @default(uuid())
+  regionId            String
+  stationId           String
+  deviceId            String
+  voltageLevel        String
+  startTime           DateTime
+  restorationTime     DateTime?
+  causeCodeId         String
+  loadLostMw          Float?
+  coordinatedBy       String
+  informedParty       String
+  remarks             String?
+  closingRemarks      String?
+  finalStatusSummary  String?
+  shiftCode           ShiftCode
+  status              InterruptionStatus         @default(OPEN)
+  openedById          String
+  region              Region                     @relation(fields: [regionId], references: [id])
+  station             Station                    @relation(fields: [stationId], references: [id])
+  device              Device                     @relation(fields: [deviceId], references: [id])
+  causeCode           InterruptionCauseCode      @relation(fields: [causeCodeId], references: [id])
+  openedBy            User                       @relation("openedBy", fields: [openedById], references: [id])
+  statusHistory       InterruptionStatusHistory[]
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  @@index([status, stationId, startTime])
+}
+
+model InterruptionStatusHistory {
+  id             String             @id @default(uuid())
+  interruptionId String
+  status         InterruptionStatus
+  changedById    String
+  summary        String
+  createdAt      DateTime           @default(now())
+  interruption   Interruption       @relation(fields: [interruptionId], references: [id], onDelete: Cascade)
+  changedBy      User               @relation(fields: [changedById], references: [id])
+}
+
+model OperationForm {
+  id        String      @id @default(uuid())
+  code      String      @unique
+  name      String
+  operations Operation[]
+}
+
+model Operation {
+  id             String                  @id @default(uuid())
+  regionId       String
+  stationId      String
+  deviceId       String?
+  voltageLevel   String
+  operationType  String
+  operationFormId String
+  startDateTime  DateTime
+  endDateTime    DateTime?
+  requestedBy    String
+  approvedBy     String?
+  reason         String
+  remarks        String?
+  status         OperationStatus         @default(DRAFT)
+  region         Region                  @relation(fields: [regionId], references: [id])
+  station        Station                 @relation(fields: [stationId], references: [id])
+  device         Device?                 @relation(fields: [deviceId], references: [id])
+  operationForm  OperationForm           @relation(fields: [operationFormId], references: [id])
+  statusHistory  OperationStatusHistory[]
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+}
+
+model OperationStatusHistory {
+  id          String          @id @default(uuid())
+  operationId String
+  status      OperationStatus
+  summary     String
+  changedById String
+  createdAt   DateTime        @default(now())
+  operation   Operation       @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  changedBy   User            @relation(fields: [changedById], references: [id])
+}
+
+model Event {
+  id          String        @id @default(uuid())
+  regionId    String
+  stationId   String
+  deviceId    String?
+  eventType   String
+  severity    EventSeverity
+  occurredAt  DateTime
+  description String
+  actionTaken String?
+  shiftCode   ShiftCode
+  createdById String
+  region      Region        @relation(fields: [regionId], references: [id])
+  station     Station       @relation(fields: [stationId], references: [id])
+  device      Device?       @relation(fields: [deviceId], references: [id])
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
+}
+
+model MessageThread {
+  id        String    @id @default(uuid())
+  subject   String
+  messages  Message[]
+  createdAt DateTime  @default(now())
+}
+
+model Message {
+  id              String          @id @default(uuid())
+  threadId        String
+  senderId        String
+  recipientUserId String?
+  recipientStationId String?
+  content         String
+  priority        MessagePriority @default(NORMAL)
+  status          MessageStatus   @default(UNREAD)
+  thread          MessageThread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender          User            @relation("messageSender", fields: [senderId], references: [id])
+  recipientStation Station?       @relation(fields: [recipientStationId], references: [id])
+  createdAt       DateTime        @default(now())
+}
+
+model KnowledgeCategory {
+  id        String             @id @default(uuid())
+  name      String             @unique
+  articles  KnowledgeArticle[]
+}
+
+model KnowledgeArticle {
+  id          String          @id @default(uuid())
+  categoryId  String
+  title       String
+  slug        String          @unique
+  content     String
+  isPublished Boolean         @default(false)
+  version     String          @default("1.0")
+  category    KnowledgeCategory @relation(fields: [categoryId], references: [id])
+  files       KnowledgeFile[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model KnowledgeFile {
+  id          String           @id @default(uuid())
+  articleId   String
+  fileName    String
+  storagePath String
+  mimeType    String
+  article     KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+}
+
+model NotificationChannel {
+  id        String                  @id @default(uuid())
+  type      NotificationChannelType @unique
+  isEnabled Boolean                 @default(true)
+}
+
+model NotificationRecipient {
+  id        String   @id @default(uuid())
+  name      String
+  contact   String
+  regionId  String?
+  stationId String?
+  region    Region?  @relation(fields: [regionId], references: [id])
+  station   Station? @relation(fields: [stationId], references: [id])
+}
+
+model NotificationRule {
+  id             String   @id @default(uuid())
+  eventType      String
+  stationId      String?
+  channelId      String
+  recipientGroup String
+  isActive       Boolean  @default(true)
+  channel        NotificationChannel @relation(fields: [channelId], references: [id])
+  station        Station? @relation(fields: [stationId], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([entityType, createdAt])
+}
+
+model ScadaMapping {
+  id        String   @id @default(uuid())
+  deviceId  String
+  tagId     String   @unique
+  mappingKey String  @unique
+  isActive  Boolean  @default(true)
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+model SyncQueue {
+  id         String   @id @default(uuid())
+  userId     String?
+  module     String
+  actionType String
+  payload    Json
+  status     String   @default("PENDING")
+  retries    Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
